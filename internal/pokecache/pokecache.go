@@ -20,7 +20,7 @@ func NewCache(interval time.Duration) *Cache {
 		entry: make(map[string]cacheEntry),
 	}
 
-	cache.reaploop(interval)
+	go cache.reaploop(interval)
 	return &cache
 }
 

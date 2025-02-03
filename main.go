@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"github.com/jmooli/pokedex/internal/pokecache"
 	"io"
 	"net/http"
 	"os"
 	"strings"
+	"time"
+
+	"github.com/jmooli/pokedex/internal/pokecache"
 )
 
 var commands map[string]cliCommand
@@ -34,6 +36,7 @@ type cliCommand struct {
 type Config struct {
 	Next     *string
 	Previous *string
+	Cache    *pokecache.Cache
 }
 
 func commandExit(c *Config) error {
@@ -53,7 +56,7 @@ func commandHelp(c *Config) error {
 }
 
 func commandMap(c *Config) error {
-	apiResp, err := makeApiGetRequest(*c.Next)
+	apiResp, err := makeApiGetRequest(*c.Next, c.Cache)
 	if err != nil {
 		return err
 	}
@@ -63,7 +66,7 @@ func commandMap(c *Config) error {
 	return nil
 }
 func commandMapb(c *Config) error {
-	apiResp, err := makeApiGetRequest(*c.Previous)
+	apiResp, err := makeApiGetRequest(*c.Previous, c.Cache)
 	if err != nil {
 		return err
 	}
@@ -72,25 +75,34 @@ func commandMapb(c *Config) error {
 	c.Previous = &apiResp.Previous
 	return nil
 }
-func makeApiGetRequest(url string) (ApiResponse, error) {
+func makeApiGetRequest(url string, c *pokecache.Cache) (ApiResponse, error) {
 	var apiResp ApiResponse
 
-	res, err := http.Get(url)
-	if err != nil {
-		return apiResp, err
-	}
-	defer res.Body.Close()
+	data, found := c.Get(url)
 
-	data, err := io.ReadAll(res.Body)
-	if err != nil {
-		return apiResp, err
-	}
+	if !found {
+		res, err := http.Get(url)
+		if err != nil {
+			return apiResp, err
+		}
+		defer res.Body.Close()
 
-	err = json.Unmarshal(data, &apiResp)
+		data, err = io.ReadAll(res.Body)
+		if err != nil {
+			return apiResp, err
+		}
+
+		// store the new data
+		c.Add(url, data)
+	} else {
+		fmt.Println("using cache")
+	}
+	err := json.Unmarshal(data, &apiResp)
 	if err != nil {
 		return apiResp, err
 	}
 	return apiResp, nil
+
 }
 
 func printOutAreas(apiResp ApiResponse) {
@@ -127,11 +139,10 @@ func init() {
 
 func main() {
 	config := Config{}
+	d := 30 * time.Second
+	cache := pokecache.NewCache(d)
+	initConfig(&config, cache)
 
-	// init configuration with default values
-	initConfig(&config)
-
-	cache := Ca
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
 		fmt.Print("Pokedex >")
@@ -155,11 +166,12 @@ func main() {
 	}
 }
 
-// should remove this, using the api to set next and previous @ command map and mapb
-func initConfig(c *Config) {
+// should move this init to main, using the api to set next and previous @ command map and mapb
+func initConfig(c *Config, cache *pokecache.Cache) {
 	baseUrl := "https://pokeapi.co/api/v2/location-area/"
 	fullUrl := baseUrl + "?offset=0&limit=20"
 	c.Next = &fullUrl
+	c.Cache = cache
 }
 
 func cleanInput(text string) []string {
