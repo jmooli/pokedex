@@ -127,6 +127,16 @@ func commandInspect(c *Config, param string) error {
 	return nil
 }
 
+func commandPokedex(c *Config, param string) error {
+	fmt.Println("Your Pokedex:")
+
+	for _, pokemon := range pokedex {
+		fmt.Printf(" - %s\n", pokemon.Name)
+	}
+
+	return nil
+}
+
 func printPokemonDetails(pokemon ApiPokemonResponse) {
 	fmt.Printf("Name: %s\n", pokemon.Name)
 	fmt.Printf("Height: %d\n", pokemon.Height)
@@ -230,6 +240,11 @@ func init() {
 			description: "Inspect Pokemon",
 			callback:    commandInspect,
 		},
+		"pokedex": {
+			name:        "pokedex",
+			description: "Lists all of the pokemons in Pokedex",
+			callback:    commandPokedex,
+		},
 	}
 }
 
@@ -241,7 +256,7 @@ func main() {
 
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
-		fmt.Print("Pokedex >")
+		fmt.Print("Pokedex > ")
 		scanner.Scan()
 		input := scanner.Text()
 		cleanedInput := cleanInput(input)
