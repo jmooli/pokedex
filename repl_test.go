@@ -1,6 +1,8 @@
 package main
 
-import "testing"
+import (
+	"testing"
+)
 
 var cases = []struct {
 	input    string
@@ -30,9 +32,6 @@ func TestCleanInput(t *testing.T) {
 			if word != expectedWord {
 				t.Errorf("Words do not match")
 			}
-			// Check each word in the slice
-			// if they don't match, use t.Errorf to print an error message
-			// and fail the test
 		}
 	}
 }

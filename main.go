@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"os"
 	"strings"
@@ -14,23 +15,17 @@ import (
 )
 
 var commands map[string]cliCommand
+var pokedex map[string]ApiPokemonResponse
 
-type MapData struct {
+type Result struct {
 	Name string `json:"name"`
 	URL  string `json:"url"`
-}
-
-type ApiResponse struct {
-	Count    int       `json:"count"`
-	Next     string    `json:"next"`
-	Previous string    `json:"previous"`
-	Results  []MapData `json:"results"`
 }
 
 type cliCommand struct {
 	name        string
 	description string
-	callback    func(*Config) error
+	callback    func(c *Config, param string) error
 }
 
 type Config struct {
@@ -39,13 +34,13 @@ type Config struct {
 	Cache    *pokecache.Cache
 }
 
-func commandExit(c *Config) error {
+func commandExit(c *Config, param string) error {
 	fmt.Println("Closing the Pokedex... Goodbye!")
 	os.Exit(0)
 	return nil
 }
 
-func commandHelp(c *Config) error {
+func commandHelp(c *Config, param string) error {
 	fmt.Println("Welcome to the Pokedex!")
 	fmt.Println("Usage:")
 	fmt.Println("")
@@ -55,59 +50,145 @@ func commandHelp(c *Config) error {
 	return nil
 }
 
-func commandMap(c *Config) error {
-	apiResp, err := makeApiGetRequest(*c.Next, c.Cache)
+func commandMap(c *Config, param string) error {
+	apiResp, err := makeApiGetRequest[ApiAreaResponse](*c.Next, c.Cache)
 	if err != nil {
 		return err
 	}
-	printOutAreas(apiResp)
+	printOutAreaResponse(apiResp)
 	c.Next = &apiResp.Next
 	c.Previous = &apiResp.Previous
 	return nil
 }
-func commandMapb(c *Config) error {
-	apiResp, err := makeApiGetRequest(*c.Previous, c.Cache)
+
+func commandMapb(c *Config, param string) error {
+	if c.Previous == nil || *c.Previous == "" {
+		// no previous
+		return nil
+	}
+	apiResp, err := makeApiGetRequest[ApiAreaResponse](*c.Previous, c.Cache)
 	if err != nil {
 		return err
 	}
-	printOutAreas(apiResp)
+	printOutAreaResponse(apiResp)
 	c.Next = &apiResp.Next
 	c.Previous = &apiResp.Previous
 	return nil
 }
-func makeApiGetRequest(url string, c *pokecache.Cache) (ApiResponse, error) {
-	var apiResp ApiResponse
+
+func commandExplore(c *Config, param string) error {
+	baseUrl := "https://pokeapi.co/api/v2/location-area/"
+	fullUlr := baseUrl + param
+	fmt.Printf("Exploring %s...\n", param)
+	apiResp, err := makeApiGetRequest[ApiEncounterResponse](fullUlr, c.Cache)
+	if err != nil {
+		return err
+	}
+	printOutPokemonResponce(apiResp)
+	return nil
+}
+
+func commandCatch(c *Config, param string) error {
+	baseUrl := "https://pokeapi.co/api/v2/pokemon/"
+	fullUlr := baseUrl + param
+
+	fmt.Printf("Throwing a Pokeball at %s...\n", param)
+
+	apiresp, err := makeApiGetRequest[ApiPokemonResponse](fullUlr, c.Cache)
+
+	if err != nil {
+		return err
+	}
+
+	//calculation could be little bit more sophisticated
+	if rand.Intn(300) > apiresp.BaseExperience {
+		fmt.Printf("%s was caught!\n", param)
+
+		// init if nil
+		if pokedex == nil {
+			pokedex = make(map[string]ApiPokemonResponse)
+		}
+		// store
+		pokedex[param] = apiresp
+
+	} else {
+		fmt.Printf("%s escaped!\n", param)
+	}
+
+	return nil
+}
+
+func commandInspect(c *Config, param string) error {
+	if pokemon, exists := pokedex[param]; exists {
+		printPokemonDetails(pokemon)
+	} else {
+		fmt.Println("you have not caught that pokemon")
+	}
+	return nil
+}
+
+func printPokemonDetails(pokemon ApiPokemonResponse) {
+	fmt.Printf("Name: %s\n", pokemon.Name)
+	fmt.Printf("Height: %d\n", pokemon.Height)
+	fmt.Printf("Weight: %d\n", pokemon.Weight)
+	fmt.Println("Stats:")
+
+	for _, stat := range pokemon.Stats {
+		fmt.Printf("  - %s: %d\n", stat.Stat.Name, stat.BaseStat)
+	}
+
+	fmt.Println("Types:")
+	for _, pokeType := range pokemon.Types {
+		fmt.Printf("  - %s\n", pokeType.Type.Name)
+	}
+}
+
+func makeApiGetRequest[T any](url string, c *pokecache.Cache) (T, error) {
+	var result T
 
 	data, found := c.Get(url)
 
 	if !found {
-		res, err := http.Get(url)
+		resp, err := http.Get(url)
 		if err != nil {
-			return apiResp, err
+			return result, err
 		}
-		defer res.Body.Close()
+		defer resp.Body.Close()
 
-		data, err = io.ReadAll(res.Body)
+		data, err = io.ReadAll(resp.Body)
 		if err != nil {
-			return apiResp, err
+			return result, err
 		}
 
 		// store the new data
 		c.Add(url, data)
 	} else {
-		fmt.Println("using cache")
+		//debug
+		//fmt.Println("using cache")
 	}
-	err := json.Unmarshal(data, &apiResp)
+	err := json.Unmarshal(data, &result)
 	if err != nil {
-		return apiResp, err
+		return result, err
 	}
-	return apiResp, nil
+	return result, nil
 
 }
 
-func printOutAreas(apiResp ApiResponse) {
+func printOutAreaResponse(apiResp ApiAreaResponse) {
 	for _, v := range apiResp.Results {
 		fmt.Printf("%s\n", v.Name)
+	}
+}
+
+func printOutPokemonResponce(apiResp ApiEncounterResponse) {
+	if len(apiResp.PokemonEncounters) > 0 {
+		fmt.Println("Found Pokemon:")
+		for _, entry := range apiResp.PokemonEncounters {
+			fmt.Printf(" - %s\n", entry.Pokemon.Name)
+		}
+
+	} else {
+		fmt.Println("Didn't find any Pokemons:")
 	}
 }
 
@@ -134,6 +215,21 @@ func init() {
 			description: "lists previous 20 Maps",
 			callback:    commandMapb,
 		},
+		"explore": {
+			name:        "explore",
+			description: "lists all pokemons in area",
+			callback:    commandExplore,
+		},
+		"catch": {
+			name:        "catch",
+			description: "attampt to catch a pokemon",
+			callback:    commandCatch,
+		},
+		"inspect": {
+			name:        "inspect",
+			description: "Inspect Pokemon",
+			callback:    commandInspect,
+		},
 	}
 }
 
@@ -155,8 +251,13 @@ func main() {
 		}
 
 		command, exists := commands[cleanedInput[0]]
+		param := ""
+		if len(cleanedInput) >= 2 {
+			param = cleanedInput[1]
+		}
+
 		if exists {
-			err := command.callback(&config)
+			err := command.callback(&config, param)
 			if err != nil {
 				fmt.Printf("Command error: %v\n", err)
 			}
